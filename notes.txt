@@ -1,0 +1,3 @@
+今天学了LLM API调用
+messages列表是模型的全部记忆
+tool use的本质是模型申请调用，我来执行

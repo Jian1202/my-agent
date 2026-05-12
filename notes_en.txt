@@ -1,0 +1,5 @@
+Today I learned about LLM API calls.
+The messages list is the entire memory of the model.
+The essence of tool use is that the model requests a call, and I execute it.
+
+渡 20260512
