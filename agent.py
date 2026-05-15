@@ -70,10 +70,25 @@ def write_file(path, content):
         return f"错误：{e}"
 
 def execute_python(code):
-    # 用subprocess在子进程里跑Python代码
-    # capture_output=True 把stdout和stderr都抓回来
-    # timeout=30 防止死循环或长时间阻塞把Agent卡死
-    # text=True 让输出是字符串而不是bytes
+    # 人工确认：把要执行的代码打印给用户看，用户确认后才执行
+    # 这是Agent安全的"人在回路"（human-in-the-loop）设计
+    # Claude Code、Cursor等成熟Agent都用类似机制
+    print("\n" + "=" * 60)
+    print("Agent 准备执行 Python 代码：")
+    print("-" * 60)
+    print(code)
+    print("=" * 60)
+    
+    try:
+        confirm = input("是否允许执行？(y/n，回车默认n): ").strip().lower()
+    except EOFError:
+        # 极端情况：stdin被关闭，比如脚本被管道调用
+        return "错误：无法获取用户确认（stdin不可用），代码未执行"
+    
+    if confirm != "y":
+        return f"用户已拒绝执行该代码。原因可能是代码不符合预期，请重新规划或询问用户。"
+    
+    # 用户确认后再真正执行
     import subprocess
     try:
         result = subprocess.run(
@@ -89,7 +104,6 @@ def execute_python(code):
             output += f"stderr:\n{result.stderr}"
         if not output:
             output = "(无输出)"
-        # 截断过长的输出，防止塞爆上下文
         if len(output) > 3000:
             output = output[:3000] + "\n...(输出过长，已截断)"
         return output
@@ -306,7 +320,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "execute_python",
-            "description": "执行一段Python代码并返回stdout和stderr。代码在独立子进程中运行，每次执行之间状态不共享。如果需要看到结果，代码里必须有print语句。超时限制30秒。",
+            "description": "执行一段Python代码并返回stdout和stderr。代码在独立子进程中运行，每次执行之间状态不共享。如果需要看到结果，代码里必须有print语句。超时限制30秒。注意：对于简单的文件读写（创建/读取/写入文件），优先使用 read_file 和 write_file 工具，更轻量也无需用户确认。execute_python 适合需要计算、数据处理、调用第三方库或执行复杂逻辑的场景。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -441,7 +455,7 @@ def run_agent(task, max_steps=15):
 if __name__ == "__main__":
     print("Agent 已启动，输入任务开始工作（输入 q 退出）\n")
     while True:
-        task = input("给Agent一个任务: ")
+        task = input("给小渡一个任务吧: ")
         if task.strip().lower() in ("q", "quit", "exit"):
             break
         if task.strip() == "":
