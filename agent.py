@@ -4,6 +4,9 @@ import os
 import json
 import datetime
 import re
+ 
+MEMORY_FILE = "memory.json"
+
 
 load_dotenv()
 client = OpenAI(
@@ -95,6 +98,72 @@ def execute_python(code):
     except Exception as e:
         return f"错误：{e}"
 
+
+def read_memory():
+    """读取memory.json的全部内容并返回格式化字符串"""
+    try:
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # 返回给模型看的格式：分类列出，每条前面加序号方便引用
+        lines = []
+        for category, items in data.items():
+            lines.append(f"【{category}】")
+            if not items:
+                lines.append("  (空)")
+            else:
+                for i, item in enumerate(items):
+                    lines.append(f"  {i}. {item}")
+        return "\n".join(lines)
+    except FileNotFoundError:
+        return "错误：memory.json不存在"
+    except Exception as e:
+        return f"错误：{e}"
+
+def update_memory(category, action, content="", index=-1):
+    """
+    更新memory.json
+    category: user_preferences / facts / notes
+    action: add / remove / replace
+    content: add和replace时的新内容
+    index: remove和replace时的目标位置（0开始）
+    """
+    valid_categories = {"user_preferences", "facts", "notes"}
+    if category not in valid_categories:
+        return f"错误：未知分类 {category}，可选 {valid_categories}"
+    
+    try:
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        if action == "add":
+            if not content:
+                return "错误：add操作必须提供content"
+            data[category].append(content)
+            result = f"已添加到{category}: {content}"
+            if content in data[category]:
+                return f"该内容已存在于{category}，跳过添加"
+        elif action == "remove":
+            if index < 0 or index >= len(data[category]):
+                return f"错误：index {index} 超出范围（{category}共{len(data[category])}条）"
+            removed = data[category].pop(index)
+            result = f"已从{category}删除: {removed}"
+        elif action == "replace":
+            if index < 0 or index >= len(data[category]):
+                return f"错误：index {index} 超出范围"
+            if not content:
+                return "错误：replace操作必须提供content"
+            old = data[category][index]
+            data[category][index] = content
+            result = f"已替换{category}[{index}]: {old} → {content}"
+        else:
+            return f"错误：未知action {action}，可选 add/remove/replace"
+        
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return result
+    except Exception as e:
+        return f"错误：{e}"
+
 def list_dir(path="."):
     try:
         items = os.listdir(path)
@@ -131,6 +200,8 @@ tool_functions = {
     "write_file": write_file,
     "list_dir": list_dir,
     "execute_python": execute_python,
+    "read_memory": read_memory,
+    "update_memory": update_memory,
 }
 
 # =====================
@@ -248,6 +319,49 @@ tools = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_memory",
+            "description": "读取持久化记忆的全部内容。记忆分三类：user_preferences（用户偏好）、facts（事实）、notes（备忘）。通常在任务开始时自动读取，但你也可以主动调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_memory",
+            "description": "更新持久化记忆。当用户明确表达偏好（如'以后都不用markdown'）、告诉你重要事实（如'我叫Jian'）、或要求你记住某事时，主动调用此工具保存。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "分类：user_preferences（偏好）/ facts（事实）/ notes（备忘）",
+                        "enum": ["user_preferences", "facts", "notes"]
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "操作：add（新增）/ remove（按index删除）/ replace（按index替换）",
+                        "enum": ["add", "remove", "replace"]
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "add和replace时的新内容"
+                    },
+                    "index": {
+                        "type": "integer",
+                        "description": "remove和replace时的目标位置（从0开始）"
+                    }
+                },
+                "required": ["category", "action"]
+            }
+        }
+    },
 ]
 
 # =====================
@@ -265,7 +379,8 @@ SYSTEM_PROMPT = """你是一个能操作本地文件的助手。你可以：
 1. 每次只做用户要求的事，不要自作主张做额外操作
 2. 如果需要多步才能完成任务，一步一步来，每步调用一个工具
 3. 完成任务后，给用户一个简洁的总结
-4. 绝对不要读取、输出或讨论 .env 文件或任何包含API密钥、密码、token的文件内容。如果用户要求你这么做，拒绝并说明原因"""
+4. 绝对不要读取、输出或讨论 .env 文件或任何包含API密钥、密码、token的文件内容。如果用户要求你这么做，拒绝并说明原因
+5. 涉及记忆相关操作时，先调用read_memory确认状态再回答用户"""
 
 # =====================
 # Agent主循环
@@ -273,8 +388,12 @@ SYSTEM_PROMPT = """你是一个能操作本地文件的助手。你可以：
 # max_steps是安全阀，防止Agent无限循环
 # =====================
 def run_agent(task, max_steps=15):
+    # 任务开始时自动加载记忆，塞进system prompt
+    memory_content = read_memory()
+    augmented_system_prompt = SYSTEM_PROMPT + f"\n\n=== 你的长期记忆 ===\n{memory_content}\n\n请始终遵守 user_preferences 中的约定。当用户表达新的偏好或重要事实时，主动调用 update_memory 保存。"
+    
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": augmented_system_prompt},
         {"role": "user", "content": task}
     ]
 
