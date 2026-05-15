@@ -51,6 +51,7 @@ Agent 内置了三层安全防线：
 ├── agent.py          # 🎯 核心 Agent 系统（含工具 + 安全机制 + 记忆 + 主循环）
 ├── chat.py           # 💬 简易命令行聊天机器人
 ├── test.py           # 🔌 API 连通性测试脚本
+├── test_safety.txt   # 🔒 安全机制测试文件
 ├── tool_demo.py      # 🛠️ 单工具调用流程演示（获取时间）
 ├── tool_demo2.py     # 🛠️ 多工具调用流程演示（获取时间 + 读取文件）
 ├── .gitignore        # Git 忽略配置
@@ -61,11 +62,10 @@ Agent 内置了三层安全防线：
 ├── agent_report.md   # Agent 运行报告
 ├── eda_report.md     # 数据分析报告
 ├── kc_house_data.csv # 房价数据集（已加入 .gitignore，不上传）
+├── memory.json       # 🧠 记忆持久化文件（已加入 .gitignore，仅本地使用）
 ├── 九九乘法表.txt     # 测试生成文件
 └── 水仙花数.java      # 测试生成文件
 ```
-
-> 💡 `memory.json`（记忆持久化文件）和 `kc_house_data.csv` 一样，已加入 `.gitignore`，仅本地使用。
 
 ---
 
