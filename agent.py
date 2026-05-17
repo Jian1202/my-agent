@@ -152,10 +152,10 @@ def update_memory(category, action, content="", index=-1):
         if action == "add":
             if not content:
                 return "错误：add操作必须提供content"
-            data[category].append(content)
-            result = f"已添加到{category}: {content}"
-            if content in data[category]:
+            if content in data[category]:          # 先检查
                 return f"该内容已存在于{category}，跳过添加"
+            data[category].append(content)         # 不存在才加
+            result = f"已添加到{category}: {content}"
         elif action == "remove":
             if index < 0 or index >= len(data[category]):
                 return f"错误：index {index} 超出范围（{category}共{len(data[category])}条）"
@@ -411,6 +411,10 @@ def run_agent(task, max_steps=15):
         {"role": "user", "content": task}
     ]
 
+    # 错误追踪：记录最近N次工具调用的失败情况
+    recent_errors = []  # 存最近几次错误的fingerprint
+    MAX_SAME_ERROR = 3  # 同一种错误连续出现3次就中止
+
     for step in range(1, max_steps + 1):
         response = client.chat.completions.create(
             model="deepseek-v4-flash",
@@ -434,9 +438,9 @@ def run_agent(task, max_steps=15):
             args = json.loads(tool_call.function.arguments)
             result = execute_tool(name, args)
 
+            # 先打印、先记录，让用户和模型都能看到这次调用
             print(f"\n[Agent 第{step}步 - 调用工具: {name}]")
             print(f"  参数: {args}")
-            # 终端打印也截断，避免刷屏（messages里存的是完整版）
             print(f"  结果: {result[:200]}{'...' if len(result) > 200 else ''}")
 
             messages.append({
@@ -444,6 +448,20 @@ def run_agent(task, max_steps=15):
                 "tool_call_id": tool_call.id,
                 "content": result
             })
+
+            # 再做错误追踪和中止判断
+            is_error = result.startswith("错误：") or result.startswith("用户已拒绝")
+            if is_error:
+                fingerprint = f"{name}|{json.dumps(args, sort_keys=True)}|{result[:50]}"
+                recent_errors.append(fingerprint)
+                if len(recent_errors) >= MAX_SAME_ERROR:
+                    last_n = recent_errors[-MAX_SAME_ERROR:]
+                    if all(e == last_n[0] for e in last_n):
+                        warning = f"\n[警告] 检测到连续{MAX_SAME_ERROR}次相同错误，强制中止任务。请用户重新规划。"
+                        print(warning)
+                        return warning
+            else:
+                recent_errors = []
 
     # 跑满max_steps还没结束，强制停止
     print(f"\n[Agent 达到最大步数 {max_steps}，强制停止]")
