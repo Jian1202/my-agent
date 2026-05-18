@@ -23,7 +23,7 @@ client = OpenAI(
 )
 
 # 功能开关 ---------------------------------------------------
-STREAM_ENABLED = True   # True=流式输出（边生成边打印），False=一次性返回
+STREAM_ENABLED = False   # True=流式输出（边生成边打印），False=一次性返回
 
 # 文件路径 ---------------------------------------------------
 MEMORY_FILE = "memory.json"
